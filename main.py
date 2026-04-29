@@ -11,13 +11,11 @@ CONTAINER_NAME   : (required) Name of the Docker container to watch.
 SENDER_EMAIL     : (required) Gmail address used to send alert emails.
 APP_PASSWORD     : (required) Gmail App Password for SMTP authentication.
 PRUNE_LOG_FILE   : (optional) Override the default log file path.
-
-Usage
------
-    CONTAINER_NAME=my_app SENDER_EMAIL=you@gmail.com APP_PASSWORD=xxx python healthchecker.py
+ALERT_RECIPIENTS : (required) Comma-separated list of email addresses to notify.
 """
 
 import os
+import re
 import smtplib
 import subprocess
 import time
@@ -37,7 +35,7 @@ load_dotenv()
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-# In-memory store for validated environment variables populated by load_env_vars().
+# In-memory store for validated environment variables, populated by load_env_vars().
 env_vars: dict[str, str] = {}
 
 # How long (seconds) the watcher sleeps between health checks.
@@ -48,9 +46,6 @@ LOG_FILE = os.environ.get(
     "PRUNE_LOG_FILE",
     Path(os.environ.get("HOME", "/tmp")).joinpath("var", "log", "healthchecker.log"),
 )
-
-# Recipients for alert emails.
-ALERT_RECIPIENTS: list[str] = ["oshankashyap@protonmail.com", "codebase8765@gmail.com"]
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -64,7 +59,7 @@ def load_env_vars() -> tuple[bool, str]:
     (True, summary_message)   — all variables present and non-empty.
     (False, error_message)    — a required variable is missing or blank.
     """
-    required = ["CONTAINER_NAME", "SENDER_EMAIL", "APP_PASSWORD"]
+    required = ["CONTAINER_NAME", "SENDER_EMAIL", "APP_PASSWORD", "ALERT_RECIPIENTS"]
 
     for var in required:
         value = os.getenv(var)
@@ -72,12 +67,35 @@ def load_env_vars() -> tuple[bool, str]:
         if value is None:
             return False, f"Environment variable '{var}' is not set"
 
-        if value.strip() == "":
+        if not value.strip():
             return False, f"Environment variable '{var}' is empty"
 
         env_vars[var] = value
 
     return True, f"Loaded {len(required)} environment variable(s)"
+
+
+def validate_recipients() -> tuple[bool, str]:
+    """
+    Validate each email address in the ALERT_RECIPIENTS env var.
+
+    Addresses must pass a basic RFC-5321-style regex. Validation halts and
+    returns False on the first invalid address so startup fails fast with a
+    clear error rather than silently dropping bad addresses at send time.
+
+    Returns
+    -------
+    (True, summary_message)   — all addresses are well-formed.
+    (False, error_message)    — at least one address is malformed.
+    """
+    email_pattern = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+    recipients = [r.strip() for r in env_vars["ALERT_RECIPIENTS"].split(",")]
+
+    for recipient in recipients:
+        if not email_pattern.match(recipient):
+            return False, f"Invalid email address: '{recipient}'"
+
+    return True, f"Validated {len(recipients)} recipient(s)"
 
 
 def check_docker_daemon() -> tuple[bool, str]:
@@ -208,7 +226,10 @@ def handle_health_failure(container_name: str, logger) -> None:
     logger         : Logger instance used for output.
     """
     logger.critical("Health check failed — sending alert emails")
-    send_alert_emails(ALERT_RECIPIENTS, container_name, logger)
+
+    # strip() guards against whitespace padding that would cause SMTP delivery failures.
+    recipients = [r.strip() for r in env_vars["ALERT_RECIPIENTS"].split(",")]
+    send_alert_emails(recipients, container_name, logger)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -220,6 +241,13 @@ if __name__ == "__main__":
     # ── Step 1: Validate environment ──────────────────────────────────────────
     logger.info("Loading environment variables")
     success, message = load_env_vars()
+    if not success:
+        logger.error(message)
+        exit(1)
+    logger.info(message)
+
+    logger.info("Validating email recipients")
+    success, message = validate_recipients()
     if not success:
         logger.error(message)
         exit(1)
