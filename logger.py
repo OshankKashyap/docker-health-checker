@@ -34,11 +34,6 @@ COLORS = {
     "CRITICAL": "\033[41m",  # Red background
 }
 
-LOG_FILE = os.environ.get(
-    "PRUNE_LOG_FILE", Path(os.environ.get("HOME")).joinpath("var", "log", "prune.log")
-)
-
-
 # ── Colored formatter (terminal only) ───────────────────────────────────────
 
 

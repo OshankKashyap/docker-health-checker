@@ -39,12 +39,12 @@ load_dotenv()
 env_vars: dict[str, str] = {}
 
 # How long (seconds) the watcher sleeps between health checks.
-WATCH_INTERVAL_SECONDS = 10
+WATCH_INTERVAL_SECONDS = 60
 
 # Log file path — override via PRUNE_LOG_FILE env var if needed.
 LOG_FILE = os.environ.get(
     "PRUNE_LOG_FILE",
-    Path(os.environ.get("HOME", "/tmp")).joinpath("var", "log", "healthchecker.log"),
+    Path().joinpath("/", "var", "log", "healthchecker.log"),
 )
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

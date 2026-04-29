@@ -1,0 +1,27 @@
+[Unit]
+Description=Health Checker Script Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+WorkingDirectory=/home/test/Projects/docker_container_health_checker/
+ExecStart=/home/test/Projects/docker_container_health_checker/start.sh
+
+# ── Restart policy ────────────────────────────────────────────────────────────
+Restart=on-failure
+RestartSec=5s
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=health-checker-service
+
+# ── Environment ───────────────────────────────────────────────────────────────
+# Uncomment and set any env vars your app needs:
+EnvironmentFile=/home/test/Projects/docker_container_health_checker/.env
+
+[Install]
+WantedBy=multi-user.target
