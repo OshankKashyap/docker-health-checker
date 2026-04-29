@@ -205,8 +205,8 @@ def send_alert_emails(recipients: list[str], container_name: str, logger) -> Non
     msg["From"] = sender
     msg["To"] = ", ".join(recipients)
     msg["Subject"] = "Health check failed"
-    msg.attach(MIMEText(get_plain_template(container_name), "plain"))
-    msg.attach(MIMEText(get_html_template(container_name), "html"))
+    msg.attach(MIMEText(get_plain_template(), "plain"))
+    msg.attach(MIMEText(get_html_template(), "html"))
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(sender, app_password)

@@ -1,8 +1,16 @@
-def get_plain_template(container_name):
-    return f"{container_name} is down! Please come fast :-("
+import socket
+
+def get_ip_address():
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
 
 
-def get_html_template(container_name):
+def get_plain_template():
+    return f"Your MTS server is down at IP: {get_ip_address()}"
+
+
+def get_html_template():
     return f"""\
 <!DOCTYPE html>
 <html lang="en">
@@ -18,7 +26,7 @@ def get_html_template(container_name):
                 <table role="presentation" width="100%" style="max-width: 600px; background-color: #ffebee; border: 2px solid #ef5350; border-radius: 8px;">
                     <tr>
                         <td align="center" style="padding: 24px 32px; color: #c62828; font-size: 18px; font-weight: bold; line-height: 1.4; font-family: Arial, Helvetica, sans-serif;">
-                            {container_name} is down! Please come fast :-(
+                            Your MTS server is down at IP: {get_ip_address()}
                         </td>
                     </tr>
                 </table>
