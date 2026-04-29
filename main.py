@@ -8,21 +8,29 @@ uses a rotating log file alongside coloured terminal output (via logger.py).
 Environment variables
 ---------------------
 CONTAINER_NAME   : (required) Name of the Docker container to watch.
+SENDER_EMAIL     : (required) Gmail address used to send alert emails.
+APP_PASSWORD     : (required) Gmail App Password for SMTP authentication.
 PRUNE_LOG_FILE   : (optional) Override the default log file path.
 
 Usage
 -----
-    CONTAINER_NAME=my_app python healthchecker.py
+    CONTAINER_NAME=my_app SENDER_EMAIL=you@gmail.com APP_PASSWORD=xxx python healthchecker.py
 """
 
 import os
-import time
-import docker
+import smtplib
 import subprocess
+import time
 from datetime import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from pathlib import Path
+
+import docker
 from dotenv import load_dotenv
+
 from logger import get_logger
+from templates.templates import get_html_template, get_plain_template
 
 # Load .env file into the process environment before reading any variables.
 load_dotenv()
@@ -41,6 +49,8 @@ LOG_FILE = os.environ.get(
     Path(os.environ.get("HOME", "/tmp")).joinpath("var", "log", "healthchecker.log"),
 )
 
+# Recipients for alert emails.
+ALERT_RECIPIENTS: list[str] = ["oshankashyap@protonmail.com", "codebase8765@gmail.com"]
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -54,7 +64,7 @@ def load_env_vars() -> tuple[bool, str]:
     (True, summary_message)   — all variables present and non-empty.
     (False, error_message)    — a required variable is missing or blank.
     """
-    required = ["CONTAINER_NAME"]
+    required = ["CONTAINER_NAME", "SENDER_EMAIL", "APP_PASSWORD"]
 
     for var in required:
         value = os.getenv(var)
@@ -70,20 +80,21 @@ def load_env_vars() -> tuple[bool, str]:
     return True, f"Loaded {len(required)} environment variable(s)"
 
 
-def check_docker_running() -> tuple[bool, str]:
+def check_docker_daemon() -> tuple[bool, str]:
     """
     Verify that the Docker daemon is active via systemctl.
 
     Returns
     -------
-    (True,  "Docker is running")          — daemon is active.
-    (False, "Docker is not running")      — daemon is inactive or unreachable.
+    (True,  "Docker is running")      — daemon is active.
+    (False, "Docker is not running")  — daemon is inactive or unreachable.
     """
     result = subprocess.run(
         ["systemctl", "is-active", "docker"],
         capture_output=True,
     )
-    state = result.stdout.strip().decode("utf-8")
+    # decode() defaults to utf-8; strip() removes the trailing newline.
+    state = result.stdout.strip().decode()
 
     if state != "active":
         return False, "Docker is not running"
@@ -123,10 +134,10 @@ def check_docker_container(container_name: str) -> tuple[bool, str]:
 
 def run_health_checks(container_name: str, logger) -> bool:
     """
-    Execute the full set of health checks (Docker daemon + container).
+    Execute the full set of health checks (Docker daemon + named container).
 
-    Logs each step and returns False immediately on the first failure so the
-    caller can decide whether to exit or continue the watch loop.
+    Logs each step and short-circuits on the first failure so the caller can
+    decide whether to alert and exit or simply continue the watch loop.
 
     Parameters
     ----------
@@ -138,23 +149,66 @@ def run_health_checks(container_name: str, logger) -> bool:
     True  — all checks passed.
     False — at least one check failed (error already logged).
     """
-    # Check 1: Docker daemon
-    logger.info("Checking if Docker is running")
-    success, message = check_docker_running()
-    if not success:
-        logger.error(message)
-        return False
-    logger.info(message)
+    checks = [
+        ("Checking if Docker daemon is running", check_docker_daemon, []),
+        (
+            "Checking if Docker container is running",
+            check_docker_container,
+            [container_name],
+        ),
+    ]
 
-    # Check 2: Target container
-    logger.info("Checking if Docker container is running")
-    success, message = check_docker_container(container_name)
-    if not success:
-        logger.error(message)
-        return False
-    logger.info(message)
+    for description, check_fn, args in checks:
+        logger.info(description)
+        success, message = check_fn(*args)
+        if not success:
+            logger.error(message)
+            return False
+        logger.info(message)
 
     return True
+
+
+def send_alert_emails(recipients: list[str], container_name: str, logger) -> None:
+    """
+    Send an HTML + plain-text alert email to all recipients when a health
+    check failure is detected.
+
+    Parameters
+    ----------
+    recipients     : List of email addresses to notify.
+    container_name : Container name included in the email body via templates.
+    logger         : Logger instance used for outcome logging.
+    """
+    sender = env_vars["SENDER_EMAIL"]
+    app_password = env_vars["APP_PASSWORD"]
+
+    msg = MIMEMultipart("alternative")
+    msg["From"] = sender
+    msg["To"] = ", ".join(recipients)
+    msg["Subject"] = "Health check failed"
+    msg.attach(MIMEText(get_plain_template(container_name), "plain"))
+    msg.attach(MIMEText(get_html_template(container_name), "html"))
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(sender, app_password)
+        server.sendmail(sender, recipients, msg.as_string())
+
+    logger.info(f"Alert email sent to {len(recipients)} recipient(s)")
+
+
+def handle_health_failure(container_name: str, logger) -> None:
+    """
+    Centralised response to a failed health check: log a critical event and
+    dispatch alert emails.
+
+    Parameters
+    ----------
+    container_name : Passed through to the email templates.
+    logger         : Logger instance used for output.
+    """
+    logger.critical("Health check failed — sending alert emails")
+    send_alert_emails(ALERT_RECIPIENTS, container_name, logger)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -176,6 +230,7 @@ if __name__ == "__main__":
     # ── Step 2: Initial health check before entering the watch loop ───────────
     logger.info("Running initial health checks")
     if not run_health_checks(container_name, logger):
+        handle_health_failure(container_name, logger)
         exit(1)
     logger.info("Initial health checks passed — starting watcher")
 
@@ -188,10 +243,7 @@ if __name__ == "__main__":
         logger.info(f"[{timestamp}] Running scheduled health check")
 
         if not run_health_checks(container_name, logger):
-            logger.critical("Health check failed — stopping watcher")
-            break
+            handle_health_failure(container_name, logger)
+            continue
 
         logger.info(f"[{timestamp}] All checks passed")
-
-    logger.critical("Something terrible has happened — shutting down")
-    exit(1)
