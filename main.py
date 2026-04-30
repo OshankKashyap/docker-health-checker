@@ -38,9 +38,6 @@ load_dotenv()
 # In-memory store for validated environment variables, populated by load_env_vars().
 env_vars: dict[str, str] = {}
 
-# How long (seconds) the watcher sleeps between health checks.
-WATCH_INTERVAL_SECONDS = 60
-
 # Log file path — override via PRUNE_LOG_FILE env var if needed.
 LOG_FILE = os.environ.get(
     "PRUNE_LOG_FILE",
@@ -59,20 +56,26 @@ def load_env_vars() -> tuple[bool, str]:
     (True, summary_message)   — all variables present and non-empty.
     (False, error_message)    — a required variable is missing or blank.
     """
-    required = ["CONTAINER_NAME", "SENDER_EMAIL", "APP_PASSWORD", "ALERT_RECIPIENTS"]
+    required_str = ["CONTAINER_NAME", "SENDER_EMAIL", "APP_PASSWORD", "ALERT_RECIPIENTS", "WATCH_INTERVAL_SECONDS"]
+    int_vars = ["WATCH_INTERVAL_SECONDS"]
 
-    for var in required:
+    for var in required_str:
         value = os.getenv(var)
 
         if value is None:
             return False, f"Environment variable '{var}' is not set"
 
-        if not value.strip():
+        if not value.strip() and value not in int_vars:
             return False, f"Environment variable '{var}' is empty"
+        elif var in int_vars:
+            try:
+                value = int(value)
+            except ValueError:
+                return False, f"Environment variable '{var}' is not an integer"
 
         env_vars[var] = value
 
-    return True, f"Loaded {len(required)} environment variable(s)"
+    return True, f"Loaded {len(required_str)} environment variable(s)"
 
 
 def validate_recipients() -> tuple[bool, str]:
@@ -264,7 +267,7 @@ if __name__ == "__main__":
 
     # ── Step 3: Continuous watch loop ─────────────────────────────────────────
     while True:
-        time.sleep(WATCH_INTERVAL_SECONDS)
+        time.sleep(env_vars["WATCH_INTERVAL_SECONDS"])
 
         # Stamp each iteration so log files clearly show when each check ran.
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
