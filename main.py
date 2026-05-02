@@ -7,11 +7,13 @@ uses a rotating log file alongside coloured terminal output (via logger.py).
 
 Environment variables
 ---------------------
-CONTAINER_NAME   : (required) Name of the Docker container to watch.
-SENDER_EMAIL     : (required) Gmail address used to send alert emails.
-APP_PASSWORD     : (required) Gmail App Password for SMTP authentication.
-PRUNE_LOG_FILE   : (optional) Override the default log file path.
-ALERT_RECIPIENTS : (required) Comma-separated list of email addresses to notify.
+CONTAINER_NAME          : (required) Name of the Docker container to watch.
+SENDER_EMAIL            : (required) Gmail address used to send alert emails.
+APP_PASSWORD            : (required) Gmail App Password for SMTP authentication.
+PRUNE_LOG_FILE          : (optional) Override the default log file path.
+ALERT_RECIPIENTS        : (required) Comma-separated list of email addresses to notify.
+WATCH_INTERVAL_SECONDS  : (required) Seconds to wait between health checks.
+MAX_CONSECUTIVE_ERRORS  : (required) Failure threshold before alerts are suppressed.
 """
 
 import os
@@ -36,7 +38,7 @@ load_dotenv()
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 # In-memory store for validated environment variables, populated by load_env_vars().
-env_vars: dict[str, str] = {}
+env_vars: dict[str, str | int] = {}
 
 # Log file path — override via PRUNE_LOG_FILE env var if needed.
 LOG_FILE = os.environ.get(
@@ -56,8 +58,15 @@ def load_env_vars() -> tuple[bool, str]:
     (True, summary_message)   — all variables present and non-empty.
     (False, error_message)    — a required variable is missing or blank.
     """
-    required_str = ["CONTAINER_NAME", "SENDER_EMAIL", "APP_PASSWORD", "ALERT_RECIPIENTS", "WATCH_INTERVAL_SECONDS"]
-    int_vars = ["WATCH_INTERVAL_SECONDS"]
+    required_str = [
+        "CONTAINER_NAME",
+        "SENDER_EMAIL",
+        "APP_PASSWORD",
+        "ALERT_RECIPIENTS",
+        "WATCH_INTERVAL_SECONDS",
+        "MAX_CONSECUTIVE_ERRORS",
+    ]
+    int_vars = ["WATCH_INTERVAL_SECONDS", "MAX_CONSECUTIVE_ERRORS"]
 
     for var in required_str:
         value = os.getenv(var)
@@ -190,16 +199,15 @@ def run_health_checks(container_name: str, logger) -> bool:
     return True
 
 
-def send_alert_emails(recipients: list[str], container_name: str, logger) -> None:
+def send_alert_emails(recipients: list[str], logger) -> None:
     """
     Send an HTML + plain-text alert email to all recipients when a health
     check failure is detected.
 
     Parameters
     ----------
-    recipients     : List of email addresses to notify.
-    container_name : Container name included in the email body via templates.
-    logger         : Logger instance used for outcome logging.
+    recipients : List of email addresses to notify.
+    logger     : Logger instance used for outcome logging.
     """
     sender = env_vars["SENDER_EMAIL"]
     app_password = env_vars["APP_PASSWORD"]
@@ -218,21 +226,24 @@ def send_alert_emails(recipients: list[str], container_name: str, logger) -> Non
     logger.info(f"Alert email sent to {len(recipients)} recipient(s)")
 
 
-def handle_health_failure(container_name: str, logger) -> None:
+def handle_health_failure(container_name: str, logger, send_email: bool) -> None:
     """
     Centralised response to a failed health check: log a critical event and
-    dispatch alert emails.
+    optionally dispatch alert emails.
 
     Parameters
     ----------
     container_name : Passed through to the email templates.
     logger         : Logger instance used for output.
+    send_email     : When False, suppresses email dispatch after the
+                     consecutive-error threshold has been reached.
     """
-    logger.critical("Health check failed — sending alert emails")
+    if send_email:
+        logger.critical("Health check failed — sending alert emails")
 
-    # strip() guards against whitespace padding that would cause SMTP delivery failures.
-    recipients = [r.strip() for r in env_vars["ALERT_RECIPIENTS"].split(",")]
-    send_alert_emails(recipients, container_name, logger)
+        # strip() guards against whitespace padding that would cause SMTP delivery failures.
+        recipients = [r.strip() for r in env_vars["ALERT_RECIPIENTS"].split(",")]
+        send_alert_emails(recipients, logger)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -261,11 +272,12 @@ if __name__ == "__main__":
     # ── Step 2: Initial health check before entering the watch loop ───────────
     logger.info("Running initial health checks")
     if not run_health_checks(container_name, logger):
-        handle_health_failure(container_name, logger)
+        handle_health_failure(container_name, logger, True)
         exit(1)
     logger.info("Initial health checks passed — starting watcher")
 
     # ── Step 3: Continuous watch loop ─────────────────────────────────────────
+    consecutive_error_count = 0
     while True:
         time.sleep(env_vars["WATCH_INTERVAL_SECONDS"])
 
@@ -274,7 +286,25 @@ if __name__ == "__main__":
         logger.info(f"[{timestamp}] Running scheduled health check")
 
         if not run_health_checks(container_name, logger):
-            handle_health_failure(container_name, logger)
+            consecutive_error_count += 1
+            if consecutive_error_count > env_vars["MAX_CONSECUTIVE_ERRORS"]:
+                handle_health_failure(container_name, logger, False)
+                logger.error(
+                    f"[{timestamp}] Maximum consecutive errors reached "
+                    f"({env_vars['MAX_CONSECUTIVE_ERRORS']}). Emails suppressed."
+                )
+            else:
+                handle_health_failure(container_name, logger, True)
+            # Skip the success log and counter reset — checks did not pass.
             continue
+
+        # Checks passed: clear any accumulated failure streak.
+        if consecutive_error_count != 0:
+            logger.info(
+                f"[{timestamp}] Service recovered after "
+                f"{consecutive_error_count} consecutive failure(s). "
+                "Resetting error count."
+            )
+            consecutive_error_count = 0
 
         logger.info(f"[{timestamp}] All checks passed")

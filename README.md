@@ -10,6 +10,7 @@ A lightweight Python daemon that monitors a Docker daemon and a specific contain
 - Monitors a named container's running state via the Docker SDK
 - Sends multi-part HTML + plain-text alert emails via Gmail SMTP on failure
 - Configurable polling interval via environment variable
+- Suppresses repeated alert emails after a configurable consecutive-failure threshold
 - Structured logging with coloured terminal output and rotating JSON log files
 - Validates all environment variables and recipient email addresses at startup
 - Runs as a `systemd` service with automatic restart on failure
@@ -41,14 +42,15 @@ Copy `.env.example` to `.env` and fill in your values:
 cp .env.example .env
 ```
 
-| Variable               | Required | Description                                                  |
-|------------------------|----------|--------------------------------------------------------------|
-| `CONTAINER_NAME`       | Yes      | Name of the Docker container to monitor                      |
-| `SENDER_EMAIL`         | Yes      | Gmail address used to send alert emails                      |
-| `APP_PASSWORD`         | Yes      | Gmail App Password for SMTP authentication                   |
-| `ALERT_RECIPIENTS`     | Yes      | Comma-separated list of recipient email addresses            |
-| `WATCH_INTERVAL_SECONDS` | Yes    | Polling interval in seconds (e.g. `60`)                      |
-| `PRUNE_LOG_FILE`       | No       | Override the default log path (`/var/log/healthchecker.log`) |
+| Variable                  | Required | Description                                                                              |
+|---------------------------|----------|------------------------------------------------------------------------------------------|
+| `CONTAINER_NAME`          | Yes      | Name of the Docker container to monitor                                                  |
+| `SENDER_EMAIL`            | Yes      | Gmail address used to send alert emails                                                  |
+| `APP_PASSWORD`            | Yes      | Gmail App Password for SMTP authentication                                               |
+| `ALERT_RECIPIENTS`        | Yes      | Comma-separated list of recipient email addresses                                        |
+| `WATCH_INTERVAL_SECONDS`  | Yes      | Polling interval in seconds (e.g. `60`)                                                  |
+| `MAX_CONSECUTIVE_ERRORS`  | Yes      | Number of consecutive failures before alert emails are suppressed (e.g. `5`)            |
+| `PRUNE_LOG_FILE`          | No       | Override the default log path (`/var/log/healthchecker.log`)                             |
 
 > **Security note:** Never commit `.env` to version control. It contains credentials.
 
@@ -60,6 +62,7 @@ SENDER_EMAIL="alerts@example.com"
 APP_PASSWORD="xxxx xxxx xxxx xxxx"
 ALERT_RECIPIENTS="admin@example.com,oncall@example.com"
 WATCH_INTERVAL_SECONDS=60
+MAX_CONSECUTIVE_ERRORS=5
 ```
 
 ---
@@ -128,16 +131,18 @@ Startup
   │     ├─ Docker daemon active? (systemctl)
   │     └─ Container running? (Docker SDK)
   │
-  ├─ [FAIL] → Log critical, send alert emails → exit(1)
+  ├─ [FAIL] → Log critical, send alert email → exit(1)
   └─ [PASS] → Enter watch loop
                 │
                 └─ Every WATCH_INTERVAL_SECONDS
                       ├─ Run health checks
-                      ├─ [FAIL] → Log critical, send alert emails → continue
-                      └─ [PASS] → Log success → continue
+                      ├─ [FAIL] → Increment consecutive error count
+                      │     ├─ count < MAX_CONSECUTIVE_ERRORS → send alert email → continue
+                      │     └─ count ≥ MAX_CONSECUTIVE_ERRORS → suppress email, log error → continue
+                      └─ [PASS] → Reset consecutive error count → log success → continue
 ```
 
-On failure, an HTML + plain-text email is sent to all configured recipients via Gmail SMTP over SSL (port 465).
+On failure, an HTML + plain-text email is sent to all configured recipients via Gmail SMTP over SSL (port 465). Once `MAX_CONSECUTIVE_ERRORS` is reached, emails are suppressed to avoid flooding recipients during a prolonged outage. The counter resets automatically when checks pass again.
 
 ---
 
@@ -171,4 +176,5 @@ Standard Gmail passwords will not work. You must generate an App Password:
 | `Container 'X' not found` | Container name mismatch — verify with `docker ps -a` |
 | `Docker is not running` | Docker daemon is stopped — run `sudo systemctl start docker` |
 | No emails received | Check `SENDER_EMAIL`/`APP_PASSWORD`, verify App Password is active, check spam folder |
+| Emails stopped after repeated failures | Expected behaviour — `MAX_CONSECUTIVE_ERRORS` threshold reached; check logs for details |
 | Service fails to start | Check `journalctl -u health_checker` and verify `start.sh` is executable (`chmod +x start.sh`) |
