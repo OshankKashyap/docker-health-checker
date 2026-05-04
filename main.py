@@ -21,6 +21,7 @@ import re
 import smtplib
 import subprocess
 import time
+import templates.templates
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -30,7 +31,6 @@ import docker
 from dotenv import load_dotenv
 
 from logger import get_logger
-from templates.templates import get_html_template, get_plain_template
 
 # Load .env file into the process environment before reading any variables.
 load_dotenv()
@@ -199,15 +199,24 @@ def run_health_checks(container_name: str, logger) -> bool:
     return True
 
 
-def send_alert_emails(recipients: list[str], logger) -> None:
+def send_alert_emails(
+    recipients: list[str],
+    logger,
+    plain_template: str,
+    html_template: str,
+    subject: str,
+) -> None:
     """
     Send an HTML + plain-text alert email to all recipients when a health
     check failure is detected.
 
     Parameters
     ----------
-    recipients : List of email addresses to notify.
-    logger     : Logger instance used for outcome logging.
+    recipients     : List of email addresses to notify.
+    logger         : Logger instance used for outcome logging.
+    plain_template : Plain-text body of the alert email.
+    html_template  : HTML body of the alert email.
+    subject        : Subject line of the alert email.
     """
     sender = env_vars["SENDER_EMAIL"]
     app_password = env_vars["APP_PASSWORD"]
@@ -215,9 +224,9 @@ def send_alert_emails(recipients: list[str], logger) -> None:
     msg = MIMEMultipart("alternative")
     msg["From"] = sender
     msg["To"] = ", ".join(recipients)
-    msg["Subject"] = "Health check failed"
-    msg.attach(MIMEText(get_plain_template(), "plain"))
-    msg.attach(MIMEText(get_html_template(), "html"))
+    msg["Subject"] = subject
+    msg.attach(MIMEText(plain_template, "plain"))
+    msg.attach(MIMEText(html_template, "html"))
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(sender, app_password)
@@ -226,7 +235,13 @@ def send_alert_emails(recipients: list[str], logger) -> None:
     logger.info(f"Alert email sent to {len(recipients)} recipient(s)")
 
 
-def handle_health_failure(container_name: str, logger, send_email: bool) -> None:
+def handle_health_failure(
+    container_name: str,
+    logger,
+    send_email: bool,
+    plain_template: str = "",
+    html_template: str = "",
+) -> None:
     """
     Centralised response to a failed health check: log a critical event and
     optionally dispatch alert emails.
@@ -237,13 +252,17 @@ def handle_health_failure(container_name: str, logger, send_email: bool) -> None
     logger         : Logger instance used for output.
     send_email     : When False, suppresses email dispatch after the
                      consecutive-error threshold has been reached.
+    plain_template : Plain-text body rendered before calling this function.
+                     Ignored when send_email is False.
+    html_template  : HTML body rendered before calling this function.
+                     Ignored when send_email is False.
     """
     if send_email:
         logger.critical("Health check failed — sending alert emails")
 
         # strip() guards against whitespace padding that would cause SMTP delivery failures.
         recipients = [r.strip() for r in env_vars["ALERT_RECIPIENTS"].split(",")]
-        send_alert_emails(recipients, logger)
+        send_alert_emails(recipients, logger, plain_template, html_template, subject="Health check failed")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -272,11 +291,18 @@ if __name__ == "__main__":
     # ── Step 2: Initial health check before entering the watch loop ───────────
     logger.info("Running initial health checks")
     if not run_health_checks(container_name, logger):
-        handle_health_failure(container_name, logger, True)
+        handle_health_failure(
+            container_name,
+            logger,
+            True,
+            templates.templates.get_plain_template(),
+            templates.templates.get_html_template(),
+        )
         exit(1)
     logger.info("Initial health checks passed — starting watcher")
 
     # ── Step 3: Continuous watch loop ─────────────────────────────────────────
+    downtime = None
     consecutive_error_count = 0
     while True:
         time.sleep(env_vars["WATCH_INTERVAL_SECONDS"])
@@ -287,6 +313,8 @@ if __name__ == "__main__":
 
         if not run_health_checks(container_name, logger):
             consecutive_error_count += 1
+            if downtime is None:
+                downtime = datetime.now()
             if consecutive_error_count > env_vars["MAX_CONSECUTIVE_ERRORS"]:
                 handle_health_failure(container_name, logger, False)
                 logger.error(
@@ -294,7 +322,13 @@ if __name__ == "__main__":
                     f"({env_vars['MAX_CONSECUTIVE_ERRORS']}). Emails suppressed."
                 )
             else:
-                handle_health_failure(container_name, logger, True)
+                handle_health_failure(
+                    container_name,
+                    logger,
+                    True,
+                    templates.templates.get_plain_template(),
+                    templates.templates.get_html_template(),
+                )
             # Skip the success log and counter reset — checks did not pass.
             continue
 
@@ -305,6 +339,25 @@ if __name__ == "__main__":
                 f"{consecutive_error_count} consecutive failure(s). "
                 "Resetting error count."
             )
+            downtime_diff = datetime.now() - downtime
+            logger.info(
+                f"[{timestamp}] Service was down for "
+                f"{downtime_diff} (HH:MM:SS)"
+            )
             consecutive_error_count = 0
+            # Parse recipients the same way the failure path does, to avoid
+            # passing the raw comma-separated string to sendmail.
+            recipients = [
+                r.strip()
+                for r in env_vars["ALERT_RECIPIENTS"].split(",")
+            ]
+            send_alert_emails(
+                recipients,
+                logger,
+                templates.templates.get_plain_up_template(downtime_diff),
+                templates.templates.get_html_up_template(downtime_diff),
+                subject="Service is back up",
+            )
+            downtime = None
 
         logger.info(f"[{timestamp}] All checks passed")
