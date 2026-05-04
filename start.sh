@@ -28,4 +28,4 @@ pip install --quiet -r "$REQUIREMENTS"
 
 # ── Launch application ────────────────────────────────────────────────────────
 echo "[INFO] Starting main.py with Python: $(which python) ($(python --version))"
-exec python "$MAIN"
+exec python "$MAIN" --start-checker

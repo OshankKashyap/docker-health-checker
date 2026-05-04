@@ -1,0 +1,17 @@
+{
+  "sender_email": "oshankkashyap@gmail.com",
+  "app_password": "hpcmrptnrssqfmlp",
+  "watch_interval": 10,
+  "max_consecutive_errors": 1,
+  "global_recipients": ["oshankkashyap@gmail.com"],
+  "containers": [
+    {
+      "name": "task_manager-web-1",
+      "recipients": ["rockykumar1519@gmail.com"]
+    },
+    {
+      "name": "test-apache",
+      "recipients": []
+    }
+  ]
+}
