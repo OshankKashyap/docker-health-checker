@@ -127,11 +127,9 @@ def get_config_file() -> dict:
 
     if _config_cache is None:
         with open(CONFIG_FILE, "r") as f:
-            print("reading from file")
             _config_cache = json.load(f)
         validate_config(_config_cache)  # validate once, on first load
 
-    print("reading from cache")
     return _config_cache
 
 

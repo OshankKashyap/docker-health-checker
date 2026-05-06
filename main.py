@@ -140,7 +140,7 @@ def send_alert_emails(
     plain_template: str,
     html_template: str,
     subject: str,
-) -> None:
+) -> tuple[bool, str]:
     """
     Send an HTML + plain-text alert email to all recipients.
 
@@ -152,6 +152,11 @@ def send_alert_emails(
     plain_template : Plain-text body of the alert email.
     html_template  : HTML body of the alert email.
     subject        : Subject line of the alert email.
+
+    Returns
+    -------
+    (True,  "")            — email dispatched successfully.
+    (False, <error str>)   — SMTP error; caller should log the message.
     """
     app_password = helpers.get_app_password()
 
@@ -163,10 +168,15 @@ def send_alert_emails(
     msg.attach(MIMEText(html_template, "html"))
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(sender, app_password)
-        server.sendmail(sender, recipients, msg.as_string())
+        try:
+            server.login(sender, app_password)
+            server.sendmail(sender, recipients, msg.as_string())
+        except Exception as exc:
+            # Surface the SMTP error to the caller rather than discarding it.
+            return False, f"Failed to send alert email to {recipients}: {exc}"
 
     logger.info(f"Alert email sent to {len(recipients)} recipient(s)")
+    return True, ""
 
 
 def handle_health_failure(
@@ -195,7 +205,7 @@ def handle_health_failure(
             f"Health check failed for '{container_name}' — "
             f"sending alert emails to {len(recipients)} recipient(s)"
         )
-        send_alert_emails(
+        success, msg = send_alert_emails(
             helpers.get_sender_email(),
             recipients,
             logger,
@@ -203,6 +213,9 @@ def handle_health_failure(
             html_template,
             subject=f"Health check failed: {container_name}",
         )
+
+        if not success:
+            logger.critical(f"Failed to send alert emails: {msg}")
 
 
 def handle_health_recovery(
@@ -227,7 +240,7 @@ def handle_health_recovery(
         f"was down for {downtime_diff} (HH:MM:SS)"
     )
     recipients: list[str] = helpers.get_container_recipients(container_name)
-    send_alert_emails(
+    success, msg = send_alert_emails(
         helpers.get_sender_email(),
         recipients,
         logger,
@@ -235,6 +248,9 @@ def handle_health_recovery(
         templates.templates.get_html_up_template(downtime_diff),
         subject=f"Service is back up: {container_name}",
     )
+
+    if not success:
+        logger.error(f"[{timestamp}] Failed to send recovery email: {msg}")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
