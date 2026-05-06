@@ -10,7 +10,7 @@ mypy_extensions==1.1.0
 packaging==26.2
 pathspec==1.1.1
 platformdirs==4.9.6
-pyinstaller==6.20.0
+psutil==7.2.2
 pyinstaller-hooks-contrib==2026.4
 python-dotenv==1.2.2
 pytokens==0.4.1

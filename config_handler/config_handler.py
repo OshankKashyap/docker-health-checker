@@ -12,11 +12,13 @@ from pathlib import Path
 
 from config_handler.terminal_helpers import (
     error,
+    get_interface_ips,
     info,
     print_banner,
     print_section,
     prompt_email_list,
     prompt_int,
+    prompt_interface,
     prompt_required,
 )
 
@@ -48,7 +50,7 @@ def validate_config(config: dict) -> None:
         config: The deserialised contents of config.json.
     """
     # ── Required top-level string fields ─────────────────────────────────
-    required_str_fields = ("sender_email", "app_password")
+    required_str_fields = ("sender_email", "app_password", "interface")
     for field in required_str_fields:
         if field not in config:
             error(f"Missing required field: '{field}'")
@@ -173,6 +175,11 @@ def configure_settings() -> None:
         "Suppress repeated alerts after this many back-to-back failures.",
     )
 
+    # ── Network interface ─────────────────────────────────────────────────
+    print_section("Network Interface")
+    interfaces = get_interface_ips()
+    interface = prompt_interface(interfaces)
+
     # ── Recipients ────────────────────────────────────────────────────────
     print_section("Global Recipients")
     global_recipients = prompt_email_list(
@@ -206,6 +213,7 @@ def configure_settings() -> None:
         "app_password": app_password,
         "watch_interval": watch_interval,
         "max_consecutive_errors": max_consecutive_errors,
+        "interface": interface,
         "global_recipients": global_recipients,
         "containers": containers,
     }

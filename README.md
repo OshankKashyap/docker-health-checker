@@ -32,7 +32,7 @@ Install Python dependencies:
 pip install -r requirements.txt
 ```
 
-Key dependencies: `docker`, `structlog`
+Key dependencies: `docker`, `psutil`, `structlog`
 
 ---
 
@@ -54,6 +54,7 @@ The wizard will prompt for all required values and write the file. To edit setti
     "app_password": "xxxx xxxx xxxx xxxx",
     "watch_interval": 60,
     "max_consecutive_errors": 5,
+    "interface": "eth0",
     "global_recipients": [
         "admin@example.com"
     ],
@@ -80,6 +81,7 @@ The wizard will prompt for all required values and write the file. To edit setti
 | `app_password`          | string          | Yes      | Gmail App Password for SMTP authentication                                                      |
 | `watch_interval`        | integer         | Yes      | Polling interval in seconds (e.g. `60`)                                                         |
 | `max_consecutive_errors`| integer         | Yes      | Consecutive failures before alert emails are suppressed (e.g. `5`)                              |
+| `interface`             | string          | Yes      | Network interface name used to resolve the host IP address in alert emails (e.g. `eth0`)        |
 | `global_recipients`     | list of strings | Yes      | Fallback recipient list used when a container has no recipients of its own                      |
 | `containers`            | list of objects | Yes      | One entry per container to monitor; must contain at least one entry                             |
 | `containers[].name`     | string          | Yes      | Name of the Docker container (must match `docker ps` exactly)                                   |

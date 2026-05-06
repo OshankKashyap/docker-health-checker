@@ -244,8 +244,8 @@ def handle_health_recovery(
         helpers.get_sender_email(),
         recipients,
         logger,
-        templates.templates.get_plain_up_template(downtime_diff),
-        templates.templates.get_html_up_template(downtime_diff),
+        templates.templates.get_plain_up_template(container_name, downtime_diff),
+        templates.templates.get_html_up_template(container_name, downtime_diff),
         subject=f"Service is back up: {container_name}",
     )
 
@@ -292,8 +292,8 @@ if __name__ == "__main__":
                 container,
                 logger,
                 send_email=True,
-                plain_template=templates.templates.get_plain_template(),
-                html_template=templates.templates.get_html_template(),
+                plain_template=templates.templates.get_plain_template(container),
+                html_template=templates.templates.get_html_template(container),
             )
 
     logger.info("Initial health checks complete — starting watcher")
@@ -337,8 +337,10 @@ if __name__ == "__main__":
                         container,
                         logger,
                         send_email=True,
-                        plain_template=templates.templates.get_plain_template(),
-                        html_template=templates.templates.get_html_template(),
+                        plain_template=templates.templates.get_plain_template(
+                            container
+                        ),
+                        html_template=templates.templates.get_html_template(container),
                     )
 
                 # Do not fall through to the success block below.

@@ -1,5 +1,7 @@
 """Accessor functions for Docker health-checker configuration values."""
 
+import docker
+
 import config_handler.config_handler as cfh
 
 
@@ -55,3 +57,50 @@ def get_max_consecutive_errors() -> int:
     """Return the maximum allowed consecutive errors before alerting."""
     data = cfh.get_config_file()
     return data["max_consecutive_errors"]
+
+
+def get_network_interface() -> str:
+    """Return the network interface name from the config."""
+    data = cfh.get_config_file()
+    return data["interface"]
+
+
+def get_container_mapped_ports(
+    container_name: str,
+) -> dict[str, list[str]]:
+    """Return all host ports mapped to each container port.
+
+    Queries the Docker daemon for the live port bindings of the named
+    container and returns only bindings on 0.0.0.0 (i.e. published to
+    all interfaces).  Ports that are exposed but not published (whose
+    binding list is None) are silently skipped.
+
+    Args:
+        container_name: The name or ID of the running container.
+
+    Returns:
+        A dict mapping each container port string (e.g. ``"80/tcp"``)
+        to a list of host port strings (e.g. ``["8080", "8081"]``).
+        Ports with no qualifying bindings are omitted from the result.
+    """
+    client = docker.from_env()
+    try:
+        container = client.containers.get(container_name)
+        port_bindings = container.attrs["NetworkSettings"]["Ports"]
+
+        mapped_ports: dict[str, list[str]] = {}
+        for port, bindings in port_bindings.items():
+            if bindings is None:  # Exposed but not published — skip.
+                continue
+
+            host_ports: list[str] = []
+            for binding in bindings:
+                if binding and binding["HostIp"] == "0.0.0.0":
+                    host_ports.append(binding["HostPort"])
+
+            if host_ports:  # Only include ports with active bindings.
+                mapped_ports[port] = host_ports
+    finally:
+        client.close()
+
+    return mapped_ports
