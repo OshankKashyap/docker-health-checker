@@ -1,0 +1,23 @@
+[Unit]
+Description=Health Checker Script Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+WorkingDirectory=/path/to/your/directory/
+ExecStart=/path/to/your/directory/start.sh
+
+# ── Restart policy ────────────────────────────────────────────────────────────
+Restart=on-failure
+RestartSec=5s
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=health-checker-service
+
+[Install]
+WantedBy=multi-user.target

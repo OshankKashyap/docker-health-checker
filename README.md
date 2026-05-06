@@ -131,12 +131,17 @@ python main.py --help
 ## Running as a systemd Service
 
 ### 1. Update paths in the unit file
+Copy the example service file and edit it with your actual project directory:
+
+```bash
+cp health_checker_example.service health_checker.service
+```
 
 Edit `health_checker.service` and replace the placeholder paths with your actual project directory:
 
 ```ini
-WorkingDirectory=/path/to/docker_container_health_checker/
-ExecStart=/path/to/docker_container_health_checker/start.sh
+WorkingDirectory=/path/to/your/directory/
+ExecStart=/path/to/your/directory/start.sh
 ```
 
 ### 2. Install and enable the service
@@ -212,10 +217,31 @@ Recovery emails use the same resolution logic as failure emails.
 
 Logs are written to two destinations simultaneously:
 
-- **Console** — coloured, human-readable output via `structlog`
-- **Rotating JSON file** — machine-readable, defaults to `/var/log/healthchecker.log`
+- **Console** — coloured, human-readable output with ANSI-styled level names and dimmed timestamps
+- **Rotating JSON file** — plain-text, machine-readable output, defaults to `/var/log/healthchecker.log`
 
 Override the log file path with the `PRUNE_LOG_FILE` environment variable.
+
+### Log rotation
+
+The log file is managed by a `RotatingFileHandler` with the following configuration:
+
+| Parameter      | Value   | Description                                              |
+|----------------|---------|----------------------------------------------------------|
+| `max_bytes`    | 5 MB    | Maximum size of a single log file before rotation        |
+| `backup_count` | 3       | Number of rotated backup files to retain                 |
+| `encoding`     | UTF-8   | File encoding                                            |
+
+Once `healthchecker.log` reaches 5 MB, it is rotated as follows:
+
+```
+healthchecker.log    →  healthchecker.log.1
+healthchecker.log.1  →  healthchecker.log.2
+healthchecker.log.2  →  healthchecker.log.3
+healthchecker.log.3  →  (deleted)
+```
+
+At most **4 files** exist on disk at any time (the active file + 3 backups), capping total log storage at roughly **20 MB**.
 
 ---
 

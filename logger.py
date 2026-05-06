@@ -14,8 +14,8 @@ Usage:
     log.critical("Unrecoverable error — shutting down")
 """
 
-import os
 import logging
+import os
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -128,13 +128,10 @@ def get_logger(
 
 
 # ── Quick demo ───────────────────────────────────────────────────────────────
+# log = get_logger("demo", log_file=LOG_FILE)
 
-if __name__ == "__main__":
-    # log = get_logger("demo", log_file=LOG_FILE)
-    pass
-
-    # log.debug("Initialising application…")
-    # log.info("Server listening on http://localhost:8080")
-    # log.warning("RATE_LIMIT env var not set — defaulting to 100 req/min")
-    # log.error("Could not connect to Redis at localhost:6379")
-    # log.critical("Out of disk space — halting write operations")
+# log.debug("Initialising application…")
+# log.info("Server listening on http://localhost:8080")
+# log.warning("RATE_LIMIT env var not set — defaulting to 100 req/min")
+# log.error("Could not connect to Redis at localhost:6379")
+# log.critical("Out of disk space — halting write operations")

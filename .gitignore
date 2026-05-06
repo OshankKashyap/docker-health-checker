@@ -4,3 +4,4 @@ env/*
 diffout
 config.json
 test.py
+health_checker.service
