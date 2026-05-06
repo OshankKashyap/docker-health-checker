@@ -81,7 +81,7 @@ The wizard will prompt for all required values and write the file. To edit setti
 | `app_password`          | string          | Yes      | Gmail App Password for SMTP authentication                                                      |
 | `watch_interval`        | integer         | Yes      | Polling interval in seconds (e.g. `60`)                                                         |
 | `max_consecutive_errors`| integer         | Yes      | Consecutive failures before alert emails are suppressed (e.g. `5`)                              |
-| `interface`             | string          | Yes      | Network interface name used to resolve the host IP address in alert emails (e.g. `eth0`)        |
+| `interface`             | string          | No       | Network interface name used to resolve the host IP address in alert emails (e.g. `eth0`). If omitted, alert emails display `Unknown interface` and host IP resolution is skipped. |
 | `global_recipients`     | list of strings | Yes      | Fallback recipient list used when a container has no recipients of its own                      |
 | `containers`            | list of objects | Yes      | One entry per container to monitor; must contain at least one entry                             |
 | `containers[].name`     | string          | Yes      | Name of the Docker container (must match `docker ps` exactly)                                   |

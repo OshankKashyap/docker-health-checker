@@ -62,7 +62,7 @@ def get_max_consecutive_errors() -> int:
 def get_network_interface() -> str:
     """Return the network interface name from the config."""
     data = cfh.get_config_file()
-    return data["interface"]
+    return data.get("interface", None)
 
 
 def get_container_mapped_ports(
@@ -84,22 +84,15 @@ def get_container_mapped_ports(
         Ports with no qualifying bindings are omitted from the result.
     """
     client = docker.from_env()
+    mapped_ports = {}
     try:
         container = client.containers.get(container_name)
-        port_bindings = container.attrs["NetworkSettings"]["Ports"]
-
-        mapped_ports: dict[str, list[str]] = {}
-        for port, bindings in port_bindings.items():
-            if bindings is None:  # Exposed but not published — skip.
-                continue
-
-            host_ports: list[str] = []
-            for binding in bindings:
-                if binding and binding["HostIp"] == "0.0.0.0":
-                    host_ports.append(binding["HostPort"])
-
-            if host_ports:  # Only include ports with active bindings.
-                mapped_ports[port] = host_ports
+        port_bindings = container.attrs.get("HostConfig", {}).get("PortBindings")
+        if port_bindings:
+            for container_port, host_bindings in port_bindings.items():
+                for binding in host_bindings:
+                    host_port = binding.get("HostPort")
+                    mapped_ports[host_port] = [container_port]
     finally:
         client.close()
 

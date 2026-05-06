@@ -8,7 +8,7 @@ from config_handler.helpers import (
 )
 
 
-def get_ip_address():
+def get_ip_address() -> str | None:
     """Return the IPv4 address of the configured network interface.
 
     Looks up the interface name from config, then iterates over all
@@ -28,9 +28,23 @@ def get_ip_address():
     return None
 
 
-def get_hostname():
+def get_hostname() -> str:
     """Return the hostname of the current machine."""
     return socket.gethostname()
+
+
+def _fetch_net_interface() -> str:
+    """Return the configured network interface name, or a fallback label.
+
+    Returns:
+        str: The interface name from config (e.g. ``eth0``), or the
+        string ``"Unknown interface"`` when none is configured.
+    """
+    net_interface = get_network_interface()
+    if not net_interface:
+        return "Unknown interface"
+
+    return net_interface
 
 
 def _fetch_mapped_ports(container_name: str) -> dict[str, list[str]]:
@@ -45,7 +59,10 @@ def _fetch_mapped_ports(container_name: str) -> dict[str, list[str]]:
         return {}
 
 
-def _render_port_rows(mapped_ports: dict[str, list[str]], accent: str) -> str:
+def _render_port_rows(
+    mapped_ports: dict[str, list[str]],
+    accent: str,
+) -> str:
     """Return an HTML snippet of port-mapping rows for the info table.
 
     Each container port is rendered as its own row, listing all host
@@ -54,7 +71,8 @@ def _render_port_rows(mapped_ports: dict[str, list[str]], accent: str) -> str:
 
     Args:
         mapped_ports: Dict mapping container port strings to lists of
-            host port strings, as returned by get_container_mapped_ports.
+            host port strings, as returned by
+            ``get_container_mapped_ports``.
         accent: A CSS colour string applied to the value text, matching
             the surrounding template's colour scheme.
     """
@@ -89,29 +107,78 @@ def _render_port_rows(mapped_ports: dict[str, list[str]], accent: str) -> str:
     return "\n".join(rows)
 
 
-def get_plain_template(container_name):
+def _render_interface_row(net_interface: str, accent: str) -> str:
+    """Return an HTML snippet for the network interface info-table row.
+
+    Args:
+        net_interface: The interface name string (e.g. ``eth0``), as
+            returned by ``_fetch_net_interface``.
+        accent: A CSS colour string applied to the value text, matching
+            the surrounding template's colour scheme.
+    """
+    return f"""\
+                                <tr>
+                                    <td style="padding: 0 18px 14px;">
+                                        <span style="color: #666; font-size: 10px;">
+                                            Network Interface
+                                        </span><br>
+                                        <span style="color: {accent}; font-size: 16px;">
+                                            {net_interface}
+                                        </span>
+                                    </td>
+                                </tr>"""
+
+
+def get_plain_template(container_name: str) -> str:
+    """Return a plain-text alert body for a container-down event.
+
+    Args:
+        container_name: The name of the Docker container that is down.
+    """
     hostname = get_hostname()
+    net_interface = _fetch_net_interface()
     return (
-        f"Your {container_name} is down at IP: {get_ip_address()}\nHostname: {hostname}"
+        f"Your {container_name} is down at IP: {get_ip_address()}\n"
+        f"Hostname: {hostname}\n"
+        f"Network Interface: {net_interface}"
     )
 
 
-def get_plain_up_template(container_name, downtime: str):
+def get_plain_up_template(container_name: str, downtime: str) -> str:
+    """Return a plain-text alert body for a container-recovered event.
+
+    Args:
+        container_name: The name of the Docker container that recovered.
+        downtime: A human-readable string describing the outage duration
+            (e.g. ``"5 minutes"``).
+    """
     hostname = get_hostname()
+    net_interface = _fetch_net_interface()
     return (
         f"Your {container_name} is back up at IP: {get_ip_address()} "
         f"after {downtime} of downtime.\n"
-        f"Hostname: {hostname}"
+        f"Hostname: {hostname}\n"
+        f"Network Interface: {net_interface}"
     )
 
 
-def get_html_template(container_name):
+def get_html_template(container_name: str) -> str:
+    """Return an HTML alert body for a container-down event.
+
+    Assembles server IP, hostname, network interface, and port-mapping
+    rows into a styled dark-theme email template.
+
+    Args:
+        container_name: The name of the Docker container that is down.
+    """
     ip = get_ip_address()
     hostname = get_hostname()
+    net_interface = _fetch_net_interface()
     port_rows = _render_port_rows(
         _fetch_mapped_ports(container_name),
         accent="#ff4444",
     )
+    interface_row = _render_interface_row(net_interface, accent="#ff4444")
     return f"""\
 <!DOCTYPE html>
 <html lang="en">
@@ -170,6 +237,7 @@ def get_html_template(container_name):
                                         </span>
                                     </td>
                                 </tr>
+{interface_row}
 {port_rows}
                             </table>
 
@@ -185,13 +253,25 @@ def get_html_template(container_name):
 """
 
 
-def get_html_up_template(container_name, downtime: str):
+def get_html_up_template(container_name: str, downtime: str) -> str:
+    """Return an HTML alert body for a container-recovered event.
+
+    Assembles server IP, hostname, network interface, downtime duration,
+    and port-mapping rows into a styled dark-theme email template.
+
+    Args:
+        container_name: The name of the Docker container that recovered.
+        downtime: A human-readable string describing the outage duration
+            (e.g. ``"5 minutes"``).
+    """
     ip = get_ip_address()
     hostname = get_hostname()
+    net_interface = _fetch_net_interface()
     port_rows = _render_port_rows(
         _fetch_mapped_ports(container_name),
         accent="#44ee66",
     )
+    interface_row = _render_interface_row(net_interface, accent="#44ee66")
     return f"""\
 <!DOCTYPE html>
 <html lang="en">
@@ -250,6 +330,7 @@ def get_html_up_template(container_name, downtime: str):
                                         </span>
                                     </td>
                                 </tr>
+{interface_row}
                                 <tr>
                                     <td style="padding: 0 18px 14px;">
                                         <span style="color: #666; font-size: 10px;">
