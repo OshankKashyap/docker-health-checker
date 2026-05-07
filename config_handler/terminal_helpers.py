@@ -194,3 +194,46 @@ def prompt_interface(interfaces: dict[str, str]) -> str:
         sys.exit(1)
 
     return interface_names[selected_idx]
+
+
+def prompt_containers(containers: list[str]) -> list[str]:
+    """Prompt the user to select containers by index.
+
+    Prints a numbered list of available containers, then reads a
+    comma-separated selection of indices. Exits with code 1 if the
+    input is invalid or any index is out of range.
+
+    Args:
+        containers: List of container name strings to display.
+
+    Returns:
+        The subset of container names chosen by the user.
+    """
+    if not containers:
+        error("No containers were found. Aborting.")
+        sys.exit(1)
+
+    print()
+    print(f"  {_DIM}{'─' * 50}{_RESET}")
+    for idx, container in enumerate(containers):
+        print(f"  {_DIM}[{idx}]{_RESET}  {_BOLD}{container}{_RESET}")
+    print(f"  {_DIM}{'─' * 50}{_RESET}")
+
+    while True:
+        raw = input(
+            f"  {_BOLD}{_CYAN}→{_RESET} Select containers (comma-separated): "
+        ).strip()
+
+        if not raw:
+            error("No selection made. Please enter at least one index.")
+            continue  # re-prompt instead of aborting
+
+        try:
+            selected_indices = [int(i.strip()) for i in raw.split(",")]
+            if not all(0 <= i < len(containers) for i in selected_indices):
+                raise ValueError
+            break  # ← valid input, exit the loop
+        except ValueError:
+            error(f"'{raw}' is not a valid container selection. Try again.")
+
+    return [containers[i] for i in selected_indices]

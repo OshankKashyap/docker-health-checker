@@ -10,7 +10,7 @@ A lightweight Python daemon that monitors the Docker daemon and one or more name
 - Monitors **multiple named containers** independently via the Docker SDK
 - Sends multi-part HTML + plain-text alert emails via Gmail SMTP on failure
 - Sends a **recovery email** when a container comes back up, including total downtime
-- Supports **per-container recipient lists** with a global fallback
+- Supports **per-project recipient lists** with a global fallback
 - Suppresses repeated alert emails after a configurable consecutive-failure threshold (per container)
 - Structured logging with coloured terminal output and rotating JSON log files
 - Interactive **setup wizard** (`--setup-config`) writes config to `/etc/healthchecker/config.json`
@@ -36,7 +36,7 @@ Key dependencies: `docker`, `psutil`, `structlog`
 
 ---
 
-## Configuration
+### Configuration
 
 Configuration is stored at `/etc/healthchecker/config.json`. The easiest way to create it is through the interactive setup wizard:
 
@@ -46,32 +46,33 @@ python main.py --setup-config
 
 The wizard will prompt for all required values and write the file. To edit settings later, either re-run the wizard or edit the JSON file directly.
 
-### config.json structure
+### Configuration Structure
 
+The config file uses a **project-based** structure. Each project groups one or more Docker containers together with a set of recipient email addresses that receive alerts for those containers. Global recipients receive alerts for every container across all projects.
+
+Example `config.json` structure:
 ```json
 {
-    "sender_email": "alerts@example.com",
-    "app_password": "xxxx xxxx xxxx xxxx",
-    "watch_interval": 60,
-    "max_consecutive_errors": 5,
-    "interface": "eth0",
-    "global_recipients": [
-        "admin@example.com"
-    ],
-    "containers": [
-        {
-            "name": "my-app",
-            "recipients": [
-                "oncall@example.com"
-            ]
-        },
-        {
-            "name": "my-db",
-            "recipients": []
-        }
-    ]
+  "sender_email": "alerts@example.com",
+  "app_password": "...",
+  "watch_interval": 60,
+  "max_consecutive_errors": 3,
+  "interface": "eth0",
+  "global_recipients": ["admin@example.com"],
+  "projects": {
+    "web-stack": {
+      "containers": ["nginx", "app-server"],
+      "recipients": ["webteam@example.com"]
+    },
+    "databases": {
+      "containers": ["postgres", "redis"],
+      "recipients": ["dba@example.com"]
+    }
+  }
 }
 ```
+
+During setup, the wizard will display all available Docker containers (including stopped ones) and allow you to select them by index for each project.
 
 ### Config fields
 
@@ -82,10 +83,10 @@ The wizard will prompt for all required values and write the file. To edit setti
 | `watch_interval`        | integer         | Yes      | Polling interval in seconds (e.g. `60`)                                                         |
 | `max_consecutive_errors`| integer         | Yes      | Consecutive failures before alert emails are suppressed (e.g. `5`)                              |
 | `interface`             | string          | No       | Network interface name used to resolve the host IP address in alert emails (e.g. `eth0`). If omitted, alert emails display `Unknown interface` and host IP resolution is skipped. |
-| `global_recipients`     | list of strings | Yes      | Fallback recipient list used when a container has no recipients of its own                      |
-| `containers`            | list of objects | Yes      | One entry per container to monitor; must contain at least one entry                             |
-| `containers[].name`     | string          | Yes      | Name of the Docker container (must match `docker ps` exactly)                                   |
-| `containers[].recipients` | list of strings | Yes    | Per-container recipients; leave empty (`[]`) to use `global_recipients`                         |
+| `global_recipients`     | list of strings | Yes      | Fallback recipient list used when a project has no recipients of its own                          |
+| `projects`              | dict            | Yes      | At least one project. Keys are project names; values are project objects.                       |
+| `projects.{name}.containers` | list of strings | Yes | Docker container names to monitor in this project (must match `docker ps` exactly)             |
+| `projects.{name}.recipients` | list of strings | Yes | Per-project recipients; leave empty (`[]`) to use `global_recipients`                         |
 
 > **Security note:** `/etc/healthchecker/config.json` contains credentials. Restrict its permissions:
 > ```bash
@@ -200,16 +201,16 @@ Startup
 
 Each container maintains its own independent failure streak and downtime timer, so a prolonged outage on one container does not affect alerting for any other.
 
-On failure, an HTML + plain-text email is sent to the container's configured recipients (or `global_recipients` if none are set). Once `max_consecutive_errors` is exceeded, further emails for that container are suppressed to avoid flooding recipients during a prolonged outage. When the container recovers, the counter resets and a single recovery email is sent.
+On failure, an HTML + plain-text email is sent to the project's configured recipients (or `global_recipients` if none are set). Once `max_consecutive_errors` is exceeded, further emails for that container are suppressed to avoid flooding recipients during a prolonged outage. When the container recovers, the counter resets and a single recovery email is sent.
 
 ---
 
 ## Recipient Resolution
 
-Alert emails are sent to the resolved recipient list for each container:
+Alert emails are sent to the resolved recipient list for each project:
 
-1. If the container entry has a non-empty `recipients` list → use those addresses.
-2. If the container's `recipients` list is empty → fall back to `global_recipients`.
+1. If the project entry has a non-empty `recipients` list → use those addresses.
+2. If the project's `recipients` list is empty → fall back to `global_recipients`.
 
 Recovery emails use the same resolution logic as failure emails.
 

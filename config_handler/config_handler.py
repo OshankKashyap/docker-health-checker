@@ -10,12 +10,15 @@ import os
 import sys
 from pathlib import Path
 
+from config_handler.helpers import get_all_current_containers
 from config_handler.terminal_helpers import (
     error,
     get_interface_ips,
     info,
     print_banner,
     print_section,
+    prompt,
+    prompt_containers,  # ← new, alphabetically placed
     prompt_email_list,
     prompt_int,
     prompt_interface,
@@ -77,24 +80,29 @@ def validate_config(config: dict) -> None:
         error("'global_recipients' must be a list.")
         sys.exit(1)
 
-    # ── containers ───────────────────────────────────────────────────────
-    if "containers" not in config:
-        error("Missing required field: 'containers'")
+    # ── projects ─────────────────────────────────────────────────────────
+    if "projects" not in config:
+        error("Missing required field: 'projects'")
         sys.exit(1)
-    if not isinstance(config["containers"], list):
-        error("'containers' must be a list.")
+    if not isinstance(config["projects"], dict):
+        error("'projects' must be a dict.")
         sys.exit(1)
-    if not config["containers"]:
-        error("'containers' must contain at least one entry.")
+    if not config["projects"]:
+        error("'projects' must contain at least one entry.")
         sys.exit(1)
 
-    for idx, container in enumerate(config["containers"]):
-        label = container.get("name") or f"containers[{idx}]"
-        if not isinstance(container.get("name"), str) or not container["name"].strip():
-            error(f"Container at index {idx} is missing a valid 'name'.")
+    for proj_name, proj_data in config["projects"].items():
+        if not isinstance(proj_data, dict):
+            error(f"Project '{proj_name}' must be a dict.")
             sys.exit(1)
-        if not isinstance(container.get("recipients"), list):
-            error(f"Container '{label}': 'recipients' must be a list.")
+        if (
+            not isinstance(proj_data.get("containers"), list)
+            or not proj_data["containers"]
+        ):
+            error(f"Project '{proj_name}': 'containers' must be a non-empty list.")
+            sys.exit(1)
+        if not isinstance(proj_data.get("recipients"), list):
+            error(f"Project '{proj_name}': 'recipients' must be a list.")
             sys.exit(1)
 
 
@@ -187,25 +195,30 @@ def configure_settings() -> None:
         "These addresses receive alerts for every container.",
     )
 
+    # ── Project configuration ─────────────────────────────────────────────
+    print_section("Projects Settings")
+    projects: dict[str, dict] = {}
+    available_containers = get_all_current_containers()
+    while True:
+        project_name = prompt("Project name")
+        if not project_name.strip():
+            break
+        project_containers = prompt_containers(available_containers)
+        project_emails = prompt_email_list(
+            "Project recipient email",
+            "These addresses receive alerts for every container in this project.",
+        )
+        projects[project_name] = {
+            "containers": project_containers,
+            "recipients": project_emails,
+        }
+
     # ── Per-container configuration ───────────────────────────────────────
     print_section("Container Configuration")
     print(
         "  Add each container to monitor, then assign"
         " optional per-container recipients."
     )
-
-    containers: list[dict] = []
-    while True:
-        container_name = input(
-            "\n  \033[1m\033[36m→\033[0m Container name"
-            " \033[2m(leave blank to finish)\033[0m: "
-        ).strip()
-        if not container_name:
-            break
-        recipients = prompt_email_list(
-            f"Recipient for {container_name}",
-        )
-        containers.append({"name": container_name, "recipients": recipients})
 
     # ── Write config ──────────────────────────────────────────────────────
     json_data = {
@@ -215,7 +228,7 @@ def configure_settings() -> None:
         "max_consecutive_errors": max_consecutive_errors,
         "interface": interface,
         "global_recipients": global_recipients,
-        "containers": containers,
+        "projects": projects,
     }
 
     with open(CONFIG_FILE, "w") as json_file:

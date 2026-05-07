@@ -129,40 +129,42 @@ def _render_interface_row(net_interface: str, accent: str) -> str:
                                 </tr>"""
 
 
-def get_plain_template(container_name: str) -> str:
+def get_plain_template(container_name: str, project_name: str) -> str:
     """Return a plain-text alert body for a container-down event.
 
     Args:
         container_name: The name of the Docker container that is down.
+        project_name: The project group the container belongs to.
     """
     hostname = get_hostname()
     net_interface = _fetch_net_interface()
     return (
-        f"Your {container_name} is down at IP: {get_ip_address()}\n"
+        f"Container '{container_name}' in project '{project_name}' is down at IP: {get_ip_address()}\n"
         f"Hostname: {hostname}\n"
         f"Network Interface: {net_interface}"
     )
 
 
-def get_plain_up_template(container_name: str, downtime: str) -> str:
+def get_plain_up_template(container_name: str, project_name: str, downtime: str) -> str:
     """Return a plain-text alert body for a container-recovered event.
 
     Args:
         container_name: The name of the Docker container that recovered.
+        project_name: The project group the container belongs to.
         downtime: A human-readable string describing the outage duration
             (e.g. ``"5 minutes"``).
     """
     hostname = get_hostname()
     net_interface = _fetch_net_interface()
     return (
-        f"Your {container_name} is back up at IP: {get_ip_address()} "
+        f"Container '{container_name}' in project '{project_name}' is back up at IP: {get_ip_address()} "
         f"after {downtime} of downtime.\n"
         f"Hostname: {hostname}\n"
         f"Network Interface: {net_interface}"
     )
 
 
-def get_html_template(container_name: str) -> str:
+def get_html_template(container_name: str, project_name: str) -> str:
     """Return an HTML alert body for a container-down event.
 
     Assembles server IP, hostname, network interface, and port-mapping
@@ -170,6 +172,7 @@ def get_html_template(container_name: str) -> str:
 
     Args:
         container_name: The name of the Docker container that is down.
+        project_name: The project group the container belongs to.
     """
     ip = get_ip_address()
     hostname = get_hostname()
@@ -219,7 +222,7 @@ def get_html_template(container_name: str) -> str:
                         <td style="padding: 36px 28px 28px;">
 
                             <p style="color: #ff6666; font-size: 22px; font-weight: bold;">
-                                {container_name} is down
+                                {container_name} ({project_name}) is down
                             </p>
 
                             <p style="color: #aaaaaa; font-size: 13px;">
@@ -253,7 +256,7 @@ def get_html_template(container_name: str) -> str:
 """
 
 
-def get_html_up_template(container_name: str, downtime: str) -> str:
+def get_html_up_template(container_name: str, project_name: str, downtime: str) -> str:
     """Return an HTML alert body for a container-recovered event.
 
     Assembles server IP, hostname, network interface, downtime duration,
@@ -261,6 +264,7 @@ def get_html_up_template(container_name: str, downtime: str) -> str:
 
     Args:
         container_name: The name of the Docker container that recovered.
+        project_name: The project group the container belongs to.
         downtime: A human-readable string describing the outage duration
             (e.g. ``"5 minutes"``).
     """
@@ -312,7 +316,7 @@ def get_html_up_template(container_name: str, downtime: str) -> str:
                         <td style="padding: 36px 28px 28px;">
 
                             <p style="color: #44ee66; font-size: 22px; font-weight: bold;">
-                                {container_name} is back up
+                                {container_name} ({project_name}) is back up
                             </p>
 
                             <p style="color: #aaaaaa; font-size: 13px;">

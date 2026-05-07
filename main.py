@@ -110,22 +110,11 @@ def run_health_checks(container_name: str, logger) -> bool:
     True  — all checks passed.
     False — at least one check failed (error already logged).
     """
-    checks = [
-        ("Checking if Docker daemon is running", check_docker_daemon, []),
-        (
-            "Checking if Docker container is running",
-            check_docker_container,
-            [container_name],
-        ),
-    ]
-
-    for description, check_fn, args in checks:
-        logger.info(description)
-        success, message = check_fn(*args)
-        if not success:
-            logger.error(message)
-            return False
-        logger.info(message)
+    success, message = check_docker_container(container_name)
+    if not success:
+        logger.error(message)
+        return False
+    logger.info(message)
 
     return True
 
@@ -181,6 +170,7 @@ def send_alert_emails(
 
 def handle_health_failure(
     container_name: str,
+    project_name: str,
     logger,
     send_email: bool,
     plain_template: str = "",
@@ -193,6 +183,7 @@ def handle_health_failure(
     Parameters
     ----------
     container_name : Name of the container that failed its health check.
+    project_name   : Project group the container belongs to.
     logger         : Logger instance used for output.
     send_email     : When False, suppresses email dispatch (consecutive-error
                      threshold has been reached).
@@ -200,9 +191,9 @@ def handle_health_failure(
     html_template  : HTML email body. Ignored when send_email is False.
     """
     if send_email:
-        recipients: list[str] = helpers.get_container_recipients(container_name)
+        recipients: list[str] = helpers.get_project_recipients(project_name)
         logger.critical(
-            f"Health check failed for '{container_name}' — "
+            f"Health check failed for '{container_name}' ({project_name}) — "
             f"sending alert emails to {len(recipients)} recipient(s)"
         )
         success, msg = send_alert_emails(
@@ -211,7 +202,7 @@ def handle_health_failure(
             logger,
             plain_template,
             html_template,
-            subject=f"Health check failed: {container_name}",
+            subject=f"Health check failed: {project_name} — {container_name}",
         )
 
         if not success:
@@ -220,6 +211,7 @@ def handle_health_failure(
 
 def handle_health_recovery(
     container_name: str,
+    project_name: str,
     downtime_diff,
     logger,
     timestamp: str,
@@ -231,22 +223,27 @@ def handle_health_recovery(
     Parameters
     ----------
     container_name : Name of the container that has recovered.
+    project_name   : Project group the container belongs to.
     downtime_diff  : timedelta representing how long the container was down.
     logger         : Logger instance used for output.
     timestamp      : Formatted timestamp string for log prefixing.
     """
     logger.info(
-        f"[{timestamp}] '{container_name}' recovered — "
+        f"[{timestamp}] '{container_name}' ({project_name}) recovered — "
         f"was down for {downtime_diff} (HH:MM:SS)"
     )
-    recipients: list[str] = helpers.get_container_recipients(container_name)
+    recipients: list[str] = helpers.get_project_recipients(project_name)
     success, msg = send_alert_emails(
         helpers.get_sender_email(),
         recipients,
         logger,
-        templates.templates.get_plain_up_template(container_name, downtime_diff),
-        templates.templates.get_html_up_template(container_name, downtime_diff),
-        subject=f"Service is back up: {container_name}",
+        templates.templates.get_plain_up_template(
+            container_name, project_name, downtime_diff
+        ),
+        templates.templates.get_html_up_template(
+            container_name, project_name, downtime_diff
+        ),
+        subject=f"Service is back up: {project_name} — {container_name}",
     )
 
     if not success:
@@ -281,29 +278,46 @@ if __name__ == "__main__":
     logger = get_logger("HealthChecker", log_file=LOG_FILE)
     logger.info("Health checker starting up")
 
-    containers = helpers.get_all_containers()
-    logger.info(f"Monitoring {len(containers)} container(s): {', '.join(containers)}")
+    # Check if docker is running
+    logger.info("Checking if Docker is running")
+    success, msg = check_docker_daemon()
+    if not success:
+        logger.critical(msg)
+        sys.exit(1)
+    logger.info("Docker is running")
 
     # ── Step 1: Initial health check before entering the watch loop ───────────
-    logger.info(f"Running initial health checks for {len(containers)} container(s)")
-    for container in containers:
-        if not run_health_checks(container, logger):
-            handle_health_failure(
-                container,
-                logger,
-                send_email=True,
-                plain_template=templates.templates.get_plain_template(container),
-                html_template=templates.templates.get_html_template(container),
-            )
+    projects = helpers.get_all_projects()
+    for project, data in projects.items():
+        project_containers = helpers.get_project_containers(project)
+        logger.info(
+            f"Running initial health checks for {project}: {project_containers}"
+        )
 
-    logger.info("Initial health checks complete — starting watcher")
+        for container in project_containers:
+            if not run_health_checks(container, logger):
+                handle_health_failure(
+                    container,
+                    project,
+                    logger,
+                    send_email=False,
+                    plain_template=templates.templates.get_plain_template(
+                        container, project
+                    ),
+                    html_template=templates.templates.get_html_template(
+                        container, project
+                    ),
+                )
+
+        logger.info("Initial health checks complete — starting watcher")
 
     # ── Step 2: Per-container state for the watch loop ────────────────────────
     # Each container independently tracks its consecutive failure count and the
     # moment it first went down, so a failure in one does not affect another.
-    container_state: dict[str, dict] = {
+    project_container_state: dict[str, dict] = {
         container: {"consecutive_errors": 0, "downtime": None}
-        for container in containers
+        for project in projects
+        for container in helpers.get_project_containers(project)
     }
 
     max_consecutive_errors = helpers.get_max_consecutive_errors()
@@ -315,47 +329,60 @@ if __name__ == "__main__":
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         logger.info(f"[{timestamp}] Running scheduled health checks")
 
-        for container in containers:
-            state = container_state[container]
+        for project in projects:
+            project_containers = helpers.get_project_containers(project)
+            logger.info(
+                f"[{timestamp}] Running scheduled health checks for {project}: {project_containers}"
+            )
 
-            if not run_health_checks(container, logger):
-                state["consecutive_errors"] += 1
+            for container in project_containers:
+                state = project_container_state[container]
 
-                # Record the moment this container first went down.
-                if state["downtime"] is None:
-                    state["downtime"] = datetime.now()
+                if not run_health_checks(container, logger):
+                    state["consecutive_errors"] += 1
 
-                if state["consecutive_errors"] > max_consecutive_errors:
-                    # Threshold exceeded — log only, do not send another email.
-                    handle_health_failure(container, logger, send_email=False)
-                    logger.error(
-                        f"[{timestamp}] '{container}': maximum consecutive errors reached "
-                        f"({max_consecutive_errors}). Emails suppressed."
+                    # Record the moment this container first went down.
+                    if state["downtime"] is None:
+                        state["downtime"] = datetime.now()
+
+                    if state["consecutive_errors"] > max_consecutive_errors:
+                        # Threshold exceeded — log only, do not send another email.
+                        handle_health_failure(
+                            container, project, logger, send_email=False
+                        )
+                        logger.error(
+                            f"[{timestamp}] '{container}': maximum consecutive errors reached "
+                            f"({max_consecutive_errors}). Emails suppressed."
+                        )
+                    else:
+                        handle_health_failure(
+                            container,
+                            project,
+                            logger,
+                            send_email=True,
+                            plain_template=templates.templates.get_plain_template(
+                                container, project
+                            ),
+                            html_template=templates.templates.get_html_template(
+                                container, project
+                            ),
+                        )
+
+                    # Do not fall through to the success block below.
+                    continue
+
+                # ── Container is healthy ──────────────────────────────────────────
+                if state["consecutive_errors"] != 0:
+                    # Container has just recovered — notify and reset its state.
+                    downtime_diff = datetime.now() - state["downtime"]
+                    logger.info(
+                        f"[{timestamp}] '{container}' recovered after "
+                        f"{state['consecutive_errors']} consecutive failure(s)."
                     )
-                else:
-                    handle_health_failure(
-                        container,
-                        logger,
-                        send_email=True,
-                        plain_template=templates.templates.get_plain_template(
-                            container
-                        ),
-                        html_template=templates.templates.get_html_template(container),
+                    handle_health_recovery(
+                        container, project, downtime_diff, logger, timestamp
                     )
+                    state["consecutive_errors"] = 0
+                    state["downtime"] = None
 
-                # Do not fall through to the success block below.
-                continue
-
-            # ── Container is healthy ──────────────────────────────────────────
-            if state["consecutive_errors"] != 0:
-                # Container has just recovered — notify and reset its state.
-                downtime_diff = datetime.now() - state["downtime"]
-                logger.info(
-                    f"[{timestamp}] '{container}' recovered after "
-                    f"{state['consecutive_errors']} consecutive failure(s)."
-                )
-                handle_health_recovery(container, downtime_diff, logger, timestamp)
-                state["consecutive_errors"] = 0
-                state["downtime"] = None
-
-            logger.info(f"[{timestamp}] '{container}': all checks passed")
+                logger.info(f"[{timestamp}] '{container}': all checks passed")

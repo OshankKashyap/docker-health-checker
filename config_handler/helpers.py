@@ -17,22 +17,25 @@ def get_all_containers() -> list[str]:
     return [container.get("name") for container in data["containers"]]
 
 
-def get_container_recipients(container_name: str) -> list[str]:
-    """Return the recipient list for a specific container.
+def get_project_recipients(project: str) -> list[str]:
+    """Return the recipient list for a specific project.
 
-    Falls back to the global recipient list when the container defines
-    no recipients, or when the container is not found in the config.
+    Falls back to the global recipient list when the project defines
+    no recipients, or when the project is not found in the config.
     """
     data = cfh.get_config_file()
-    for container in data["containers"]:
-        if container.get("name") == container_name:
-            recipients = container.get("recipients")
-            if not recipients:
-                return get_global_recipients()
-            return recipients
+    projects = data.get("projects", {})
+    project_data = projects.get(project)
 
-    # Container not found in config — fall back to global recipients.
-    return get_global_recipients()
+    if not project_data:
+        return get_global_recipients()
+
+    recipients = project_data.get("recipients")
+
+    if not recipients:
+        return get_global_recipients()
+
+    return recipients
 
 
 def get_app_password() -> str:
@@ -63,6 +66,21 @@ def get_network_interface() -> str:
     """Return the network interface name from the config."""
     data = cfh.get_config_file()
     return data.get("interface", None)
+
+
+def get_project_containers(project_name: str) -> list[str]:
+    data = cfh.get_config_file()
+    projects = data.get("projects", {})
+    proj_data = projects.get(project_name)
+    if proj_data is None:
+        return []
+    return proj_data.get("containers", [])
+
+
+def get_all_projects() -> dict[str, dict[str, str]]:
+    """Returns all projects"""
+    data = cfh.get_config_file()
+    return data["projects"]
 
 
 def get_container_mapped_ports(
@@ -97,3 +115,18 @@ def get_container_mapped_ports(
         client.close()
 
     return mapped_ports
+
+
+def get_all_current_containers() -> list[str]:
+    """Return the names of all containers known to the Docker daemon.
+
+    Queries Docker with ``all=True`` so stopped containers are included
+    alongside running ones — consistent with setup-wizard usage where a
+    user may want to monitor a container that is currently stopped.
+    """
+    client = docker.from_env()
+    try:
+        containers = client.containers.list(all=True)
+        return [container.name for container in containers]
+    finally:
+        client.close()
